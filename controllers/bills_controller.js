@@ -1,0 +1,160 @@
+const Bill = require('../models/bills_model');
+const { uploadToS3 } = require('../utils/utils');
+
+/**
+ * SB - Méthode pour récupérer toutes les notes de frais
+ * Si l'utilisateur est admin: récupère toutes les notes
+ * Si l'utilisateur est visiteur: récupère uniquement ses propres notes
+ * @param {Object} req - Requête HTTP contenant les infos utilisateur (email, role)
+ * @param {Object} res - Réponse HTTP
+ * @returns {Array} Liste des notes de frais au format JSON
+ */
+const getBills = async (req, res) => {
+    try {
+        const { email, role } = req.user;
+        let bills;
+
+        // SB - Admin peut voir toutes les notes, visiteur uniquement les siennes
+        if (role === 'admin') {
+            bills = await Bill.find({});
+        } else {
+            bills = await Bill.find({ userEmail: email });
+        }
+
+        res.status(200).json(bills);
+    } catch (error) {
+        console.error('Error fetching bills:', error);
+        res.status(500).json({ message: "Server error" });
+    }
+};
+
+/**
+ * SB - Méthode pour récupérer une note de frais par son ID
+ * @param {Object} req - Requête HTTP contenant l'ID de la note dans les paramètres
+ * @param {Object} res - Réponse HTTP
+ * @returns {Object} Note de frais au format JSON ou erreur 404 si non trouvée
+ */
+const getBillById = async (req, res) => {
+    try {
+        // SB - Recherche de la note par ID MongoDB
+        const bill = await Bill.findById(req.params.id);
+        if (!bill) {
+            return res.status(404).json({ message: 'Bill not found' });
+        }
+        res.json(bill);
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
+/**
+ * SB - Méthode pour mettre à jour une note de frais par son ID
+ * Permet de modifier les champs de la note (montant, description, statut, etc.)
+ * @param {Object} req - Requête HTTP contenant l'ID et les données à modifier
+ * @param {Object} res - Réponse HTTP
+ * @returns {Object} Note de frais mise à jour ou erreur 404 si non trouvée
+ */
+const updateBillById = async (req, res) => {
+    try {
+        // SB - Mise à jour avec validation des champs et retour du document modifié
+        const updatedBill = await Bill.findByIdAndUpdate(
+            req.params.id,
+            req.body,
+            { new: true, runValidators: true }
+        );
+        if (!updatedBill) {
+            return res.status(404).json({ message: 'Bill not found' });
+        }
+        res.json(updatedBill);
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
+/**
+ * SB - Méthode pour supprimer une note de frais par son ID
+ * @param {Object} req - Requête HTTP contenant l'ID de la note à supprimer
+ * @param {Object} res - Réponse HTTP
+ * @returns {Object} Message de confirmation de suppression
+ */
+const deleteBillById = async (req, res) => {
+    try {
+        // SB - Suppression définitive de la note de la base de données
+        await Bill.findByIdAndDelete(req.params.id);
+        res.json({ message: 'Bill deleted successfully' });
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
+/**
+ * SB - Méthode pour créer une nouvelle note de frais
+ * Récupère les données du formulaire, upload le justificatif sur S3
+ * et enregistre la note en base de données
+ * @param {Object} req - Requête HTTP contenant les métadonnées et le fichier justificatif
+ * @param {Object} res - Réponse HTTP
+ * @returns {Object} Note de frais créée au format JSON
+ */
+const createBill = async (req, res) => {
+    try {
+        // SB - Extraction des métadonnées de la note de frais
+        const { date, amount, description, status, type } = JSON.parse(req.body.metadata);
+        console.log(date, amount, description, status, type);
+
+        // SB - Récupération de l'email utilisateur depuis le token JWT
+        let userEmail;
+        if (req.user && typeof req.user === 'object') {
+            userEmail = req.user.email;
+        }
+
+        if (!userEmail || typeof userEmail !== 'string') {
+            return res.status(400).json({ message: "User email is missing or invalid" });
+        }
+
+        console.log('Extracted userEmail:', userEmail);
+
+        // SB - Upload du justificatif (image) sur AWS S3
+        let proofUrl;
+        if (req.file) {
+            proofUrl = await uploadToS3(req.file);
+        } else {
+            throw new Error('Proof image is required', { cause: 400 });
+        }
+
+        // SB - Construction de l'objet note de frais avec toutes les données
+        const billData = { 
+            date,
+            amount: Number(amount),
+            proof: proofUrl,
+            description: String(description),
+            status: String(status),
+            type: String(type),
+            userEmail
+        };
+
+        console.log('Bill data:', billData);
+
+        // SB - Sauvegarde de la note dans MongoDB
+        const bill = new Bill(billData);
+        await bill.save();
+        console.log('Bill saved successfully');
+
+        res.status(201).json(bill);
+
+    } catch (error) {
+        if (error['cause'] === 400) {
+            res.status(400).json({ message: error.message });
+        } else {
+            console.error('Error creating bill:', error);
+            res.status(500).json({ message: "Server error" });
+        }
+    }
+};
+
+module.exports = {
+    getBills,
+    getBillById,
+    updateBillById,
+    deleteBillById,
+    createBill
+};
