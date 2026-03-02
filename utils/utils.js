@@ -1,16 +1,10 @@
 const AWS = require('aws-sdk');
 const { v4: uuidv4 } = require('uuid');
 
-const ID = "AKIA4XSRABJSFLXDSH7B"
-const SECRET = "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"
-const BUCKET_NAME = "gsb-backend"
-
 // SB - Configuration du client AWS S3 avec les identifiants
 const s3 = new AWS.S3({
-
-    accessKeyId: ID,
-    secretAccessKey: SECRET
-
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
 })
 
 /**

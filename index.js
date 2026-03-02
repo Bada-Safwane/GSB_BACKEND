@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require("express");
 const app = express();
 const port = process.env.PORT || 3000;
@@ -16,7 +17,7 @@ app.use(cors({
 }));
 
 // SB - Connexion à MongoDB avec gestion d'erreur améliorée
-mongoose.connect(process.env.MONGODB_URI || 'mongodb+srv://safwaneb:G6zkh1zV@cluster0.wms5z.mongodb.net/nexa', {
+mongoose.connect(process.env.MONGODB_URI, {
     useNewUrlParser: true,
     useUnifiedTopology: true
 }).then(() => {
