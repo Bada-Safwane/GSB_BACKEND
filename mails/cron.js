@@ -7,7 +7,7 @@ const { envoyerRappelUtilisateursInactifs } = require('../mails/mailService'); /
  * En production: '0 8 1 * *' pour s'exécuter le 1er de chaque mois à 8h00
  */
 // Planifie l'exécution le 1er de chaque mois à 8h00
-cron.schedule('*/1 * * * *', async () => {
+cron.schedule('0 8 1 * *', async () => {
   console.log("⏰ Script cron : vérification des utilisateurs inactifs...");
   try {
     // SB - Appel de la fonction pour envoyer les rappels
