@@ -1,4 +1,5 @@
 const Bill = require('../models/bills_model');
+const User = require('../models/user_model');
 const { uploadToS3 } = require('../utils/utils');
 
 /**
@@ -17,6 +18,16 @@ const getBills = async (req, res) => {
         // SB - Admin peut voir toutes les notes, visiteur uniquement les siennes
         if (role === 'admin') {
             bills = await Bill.find({});
+
+            // Enrichir chaque facture avec le nom de l'utilisateur
+            const emails = [...new Set(bills.map(b => b.userEmail))];
+            const users = await User.find({ email: { $in: emails } }, 'email name');
+            const nameMap = Object.fromEntries(users.map(u => [u.email, u.name]));
+            bills = bills.map(b => {
+                const obj = b.toObject();
+                obj.userName = nameMap[b.userEmail] || b.userEmail;
+                return obj;
+            });
         } else {
             bills = await Bill.find({ userEmail: email });
         }
@@ -151,10 +162,51 @@ const createBill = async (req, res) => {
     }
 };
 
+/**
+ * SB - Méthode pour mettre à jour le statut de plusieurs notes en masse
+ * Réservée aux administrateurs
+ * @param {Object} req - Requête HTTP contenant ids (array) et status (string)
+ * @param {Object} res - Réponse HTTP
+ */
+const bulkUpdateStatus = async (req, res) => {
+    try {
+        const { ids, status } = req.body;
+
+        if (!ids || !Array.isArray(ids) || ids.length === 0) {
+            return res.status(400).json({ message: 'IDs array is required' });
+        }
+
+        if (!status || typeof status !== 'string') {
+            return res.status(400).json({ message: 'Status is required' });
+        }
+
+        const allowedStatuses = ['en cours', 'en attente', 'payé'];
+        if (!allowedStatuses.includes(status)) {
+            return res.status(400).json({ message: 'Invalid status value' });
+        }
+
+        if (req.user.role !== 'admin') {
+            return res.status(403).json({ message: 'Admin access required' });
+        }
+
+        await Bill.updateMany(
+            { _id: { $in: ids } },
+            { $set: { status } }
+        );
+
+        const updatedBills = await Bill.find({ _id: { $in: ids } });
+        res.json(updatedBills);
+    } catch (error) {
+        console.error('Error bulk updating bills:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+
 module.exports = {
     getBills,
     getBillById,
     updateBillById,
     deleteBillById,
-    createBill
+    createBill,
+    bulkUpdateStatus
 };
