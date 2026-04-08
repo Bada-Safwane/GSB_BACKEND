@@ -39,7 +39,7 @@ async function envoyerRappelUtilisateursInactifs() {
         from: `"Gestion Notes de Frais" <${process.env.EMAIL_USER}>`,
         to: user.email,
         subject: `Rappel : Aucune note de frais soumise pour le mois précédent`,
-        text: `Bonjour ${user.name},\n\nNous avons remarqué que vous n'avez soumis aucune note de frais le mois dernier. Pensez à les enregistrer dès que possible.\n\nMerci.`,
+        text: `Bonjour ${user.firstName},\n\nNous avons remarqué que vous n'avez soumis aucune note de frais le mois dernier. Pensez à les enregistrer dès que possible.\n\nMerci.`,
       });
 
       console.log(`📬 Email de rappel envoyé à ${user.email}`);
@@ -64,4 +64,20 @@ const envoyerMailErreurSaisie = async (email, message) => {
 };
 
 
-module.exports = { envoyerRappelUtilisateursInactifs, envoyerMailErreurSaisie };
+/**
+ * SB - Méthode pour envoyer un email de réinitialisation de mot de passe
+ * @param {String} email - Email du destinataire
+ * @param {String} firstName - Prénom de l'utilisateur
+ * @param {String} resetUrl - URL de réinitialisation
+ */
+const envoyerMailResetPassword = async (email, firstName, resetUrl) => {
+  return transporter.sendMail({
+    from: `"Gestion Notes de Frais" <${process.env.EMAIL_USER}>`,
+    to: email,
+    subject: "Réinitialisation de votre mot de passe",
+    text: `Bonjour ${firstName},\n\nVous avez demandé la réinitialisation de votre mot de passe.\n\nCliquez sur le lien suivant pour définir un nouveau mot de passe :\n${resetUrl}\n\nCe lien est valable 1 heure.\n\nSi vous n'avez pas fait cette demande, ignorez cet email.\n\nCordialement,\nL'équipe GSB`,
+  });
+};
+
+
+module.exports = { envoyerRappelUtilisateursInactifs, envoyerMailErreurSaisie, envoyerMailResetPassword };

@@ -3,7 +3,15 @@ const sha256 = require('js-sha256')
 
 //sb
 const userSchema = new mongoose.Schema({
-    name: {
+    firstName: {
+        type: String,
+        required: true,
+    },
+    lastName: {
+        type: String,
+        required: true,
+    },
+    service: {
         type: String,
         required: true,
     },
@@ -23,6 +31,14 @@ const userSchema = new mongoose.Schema({
     createdAt: {
         type: String,
         default: Date.now,
+    },
+    resetToken: {
+        type: String,
+        default: null,
+    },
+    resetTokenExpiry: {
+        type: Date,
+        default: null,
     },
 });
 

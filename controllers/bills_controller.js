@@ -1,6 +1,7 @@
 const Bill = require('../models/bills_model');
 const User = require('../models/user_model');
 const { uploadToS3 } = require('../utils/utils');
+const Tesseract = require('tesseract.js');
 
 /**
  * SB - Méthode pour récupérer toutes les notes de frais
@@ -15,14 +16,14 @@ const getBills = async (req, res) => {
         const { email, role } = req.user;
         let bills;
 
-        // SB - Admin peut voir toutes les notes, visiteur uniquement les siennes
-        if (role === 'admin') {
+        // SB - Admin/superadmin peut voir toutes les notes, visiteur uniquement les siennes
+        if (role === 'admin' || role === 'superadmin') {
             bills = await Bill.find({});
 
             // Enrichir chaque facture avec le nom de l'utilisateur
             const emails = [...new Set(bills.map(b => b.userEmail))];
-            const users = await User.find({ email: { $in: emails } }, 'email name');
-            const nameMap = Object.fromEntries(users.map(u => [u.email, u.name]));
+            const users = await User.find({ email: { $in: emails } }, 'email firstName lastName');
+            const nameMap = Object.fromEntries(users.map(u => [u.email, `${u.firstName} ${u.lastName}`]));
             bills = bills.map(b => {
                 const obj = b.toObject();
                 obj.userName = nameMap[b.userEmail] || b.userEmail;
@@ -60,14 +61,34 @@ const getBillById = async (req, res) => {
 
 /**
  * SB - Méthode pour mettre à jour une note de frais par son ID
- * Permet de modifier les champs de la note (montant, description, statut, etc.)
- * @param {Object} req - Requête HTTP contenant l'ID et les données à modifier
- * @param {Object} res - Réponse HTTP
- * @returns {Object} Note de frais mise à jour ou erreur 404 si non trouvée
+ * Admin ne peut que changer le statut et la raison de refus
+ * Superadmin peut tout modifier
  */
 const updateBillById = async (req, res) => {
     try {
-        // SB - Mise à jour avec validation des champs et retour du document modifié
+        const { role } = req.user;
+
+        // Admin ne peut modifier que le statut et la raison de refus
+        if (role === 'admin') {
+            const allowedFields = ['status', 'rejectionReason'];
+            const updateData = {};
+            for (const key of allowedFields) {
+                if (req.body[key] !== undefined) {
+                    updateData[key] = req.body[key];
+                }
+            }
+            const updatedBill = await Bill.findByIdAndUpdate(
+                req.params.id,
+                updateData,
+                { new: true, runValidators: true }
+            );
+            if (!updatedBill) {
+                return res.status(404).json({ message: 'Bill not found' });
+            }
+            return res.json(updatedBill);
+        }
+
+        // Superadmin peut tout modifier
         const updatedBill = await Bill.findByIdAndUpdate(
             req.params.id,
             req.body,
@@ -84,13 +105,13 @@ const updateBillById = async (req, res) => {
 
 /**
  * SB - Méthode pour supprimer une note de frais par son ID
- * @param {Object} req - Requête HTTP contenant l'ID de la note à supprimer
- * @param {Object} res - Réponse HTTP
- * @returns {Object} Message de confirmation de suppression
+ * Réservée au superadmin uniquement
  */
 const deleteBillById = async (req, res) => {
     try {
-        // SB - Suppression définitive de la note de la base de données
+        if (req.user.role !== 'superadmin') {
+            return res.status(403).json({ message: 'Seul le super administrateur peut supprimer des notes' });
+        }
         await Bill.findByIdAndDelete(req.params.id);
         res.json({ message: 'Bill deleted successfully' });
     } catch (error) {
@@ -180,12 +201,12 @@ const bulkUpdateStatus = async (req, res) => {
             return res.status(400).json({ message: 'Status is required' });
         }
 
-        const allowedStatuses = ['en cours', 'en attente', 'payé'];
+        const allowedStatuses = ['Soumise', 'Validée', 'Refusée', 'Remboursée'];
         if (!allowedStatuses.includes(status)) {
             return res.status(400).json({ message: 'Invalid status value' });
         }
 
-        if (req.user.role !== 'admin') {
+        if (req.user.role !== 'admin' && req.user.role !== 'superadmin') {
             return res.status(403).json({ message: 'Admin access required' });
         }
 
@@ -202,11 +223,104 @@ const bulkUpdateStatus = async (req, res) => {
     }
 };
 
+/**
+ * SB - Endpoint OCR pour extraire des données d'un justificatif
+ * Utilise Tesseract.js pour la reconnaissance de texte
+ */
+const ocrExtract = async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ message: 'Image requise' });
+        }
+
+        console.log('OCR: début de l\'analyse, taille:', req.file.size, 'octets');
+
+        const { data: { text } } = await Tesseract.recognize(
+            req.file.buffer,
+            'fra+eng',
+            {}
+        );
+
+        console.log('OCR: texte extrait:', text.substring(0, 200));
+
+        // Extraire le montant — patterns du plus spécifique au plus générique
+        const amountPatterns = [
+            // Libellés français courants suivis d'un montant
+            /total\s*(?:ttc|ht|tva)?[:\s€]*(\d+[.,]\d{2})/i,
+            /montant\s*(?:ttc|ht|tva)?[:\s€]*(\d+[.,]\d{2})/i,
+            /net\s*[àa]\s*payer[:\s€]*(\d+[.,]\d{2})/i,
+            /somme\s*(?:due)?[:\s€]*(\d+[.,]\d{2})/i,
+            /à\s*payer[:\s€]*(\d+[.,]\d{2})/i,
+            // Libellés anglais
+            /amount[:\s$]*(\d+[.,]\d{2})/i,
+            /total[:\s$]*(\d+[.,]\d{2})/i,
+            // Montants avec symbole monétaire
+            /(\d+[.,]\d{2})\s*€/,
+            /€\s*(\d+[.,]\d{2})/,
+            /(\d+[.,]\d{2})\s*eur(?:os?)?/i,
+            /(\d+[.,]\d{2})\s*\$/,
+            /\$\s*(\d+[.,]\d{2})/,
+            // Fallback: n'importe quel nombre décimal (prend le plus grand)
+        ];
+
+        let amount = null;
+        for (const pattern of amountPatterns) {
+            const match = text.match(pattern);
+            if (match) {
+                amount = parseFloat(match[1].replace(',', '.'));
+                break;
+            }
+        }
+
+        // Fallback: si aucun pattern nommé, chercher le plus grand nombre décimal
+        if (!amount) {
+            const allAmounts = [...text.matchAll(/(\d+)[.,](\d{2})\b/g)];
+            if (allAmounts.length > 0) {
+                const values = allAmounts.map(m => parseFloat(`${m[1]}.${m[2]}`));
+                amount = Math.max(...values);
+            }
+        }
+
+        // Extraire la date (dd/mm/yyyy, dd-mm-yyyy, dd.mm.yyyy, yyyy-mm-dd)
+        const datePatterns = [
+            { re: /(\d{2})[\/\-.](\d{2})[\/\-.](\d{4})/, format: 'dmy' },
+            { re: /(\d{4})[\/\-.](\d{2})[\/\-.](\d{2})/, format: 'ymd' },
+            { re: /(\d{2})[\/\-.](\d{2})[\/\-.](\d{2})/, format: 'dmy2' },
+        ];
+
+        let date = null;
+        for (const { re, format } of datePatterns) {
+            const match = text.match(re);
+            if (match) {
+                if (format === 'ymd') {
+                    date = `${match[3]}/${match[2]}/${match[1]}`;
+                } else {
+                    const year = match[3].length === 2 ? `20${match[3]}` : match[3];
+                    date = `${match[1]}/${match[2]}/${year}`;
+                }
+                break;
+            }
+        }
+
+        console.log('OCR: montant extrait:', amount, 'date extraite:', date);
+
+        res.json({
+            rawText: text.substring(0, 500),
+            extractedAmount: amount,
+            extractedDate: date,
+        });
+    } catch (error) {
+        console.error('OCR error:', error);
+        res.status(500).json({ message: 'Erreur lors de l\'analyse OCR: ' + error.message });
+    }
+};
+
 module.exports = {
     getBills,
     getBillById,
     updateBillById,
     deleteBillById,
     createBill,
-    bulkUpdateStatus
+    bulkUpdateStatus,
+    ocrExtract
 };

@@ -1,19 +1,20 @@
 const User = require('../models/user_model');
+const sha256 = require('js-sha256');
 
 /**
  * SB - Méthode pour récupérer tous les utilisateurs
- * @param {Object} req - Requête HTTP
- * @param {Object} res - Réponse HTTP
- * @returns {Array} Liste de tous les utilisateurs au format JSON
+ * Réservée aux admin et superadmin
  */
 const getUsers = async (req, res) => {
   try{
-    // SB - Récupération de tous les utilisateurs depuis MongoDB
-    const users = await User.find({});
+    if (req.user.role !== 'admin' && req.user.role !== 'superadmin') {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+    const users = await User.find({}).select('-password -resetToken -resetTokenExpiry');
     res.json(users);
   }
   catch(error){
-    res.status(500).json({ message: "creation error" });
+    res.status(500).json({ message: "fetch error" });
   }
 };
 
@@ -78,11 +79,9 @@ const updateUserByEmail = async (req, res) => {
   try {
     const updateData = { ...req.body };
 
-    // SB - Vérification et hashage du mot de passe si présent
-    // Check if a password field is present (assuming it's called 'motDePasse')
-    if (updateData.motDePasse) {
-      const sha256Hash = crypto.createHash('sha256').update(updateData.motDePasse).digest('hex');
-      updateData.motDePasse = sha256Hash;
+    // SB - Hashage du mot de passe si présent
+    if (updateData.password) {
+      updateData.password = sha256(updateData.password + process.env.salt);
     }
 
     // SB - Mise à jour de l'utilisateur avec validation
@@ -108,13 +107,13 @@ const updateUserByEmail = async (req, res) => {
 
 /**
  * SB - Méthode pour supprimer un utilisateur par son email
- * @param {Object} req - Requête HTTP contenant l'email de l'utilisateur à supprimer
- * @param {Object} res - Réponse HTTP
- * @returns {Object} Message de confirmation de suppression
+ * Réservée au superadmin
  */
 const deleteUserByEmail = async (req, res) => {
   try {
-    // SB - Suppression définitive de l'utilisateur
+    if (req.user.role !== 'superadmin') {
+      return res.status(403).json({ message: 'Seul le super administrateur peut supprimer des utilisateurs' });
+    }
     await User.findOneAndDelete({ email: req.params.email });
     res.json({ message: 'User deleted successfully' });
   } catch (error) {

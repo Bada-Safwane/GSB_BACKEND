@@ -34,6 +34,10 @@ const billsSchema = new mongoose.Schema({
         type: String,
         default: Date.now(),
     },
+    rejectionReason: {
+        type: String,
+        default: null,
+    },
 });
 
 
