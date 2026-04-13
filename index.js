@@ -7,7 +7,6 @@ const billsRoute = require('./routes/bills_routes');
 const authentificationRoute = require('./routes/authentification_routes');
 const mongoose = require('mongoose');
 const cors = require('cors');
-require('./mails/cron'); // SB - Chargement du cron pour les rappels automatiques
 
 // SB - Configuration de CORS pour autoriser les requêtes cross-origin
 app.use(cors({

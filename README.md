@@ -4,20 +4,21 @@
 
 API REST backend pour la gestion des notes de frais du laboratoire pharmaceutique **Galaxy Swiss Bourdin (GSB)**. Cette application permet aux visiteurs médicaux de soumettre leurs notes de frais et aux administrateurs de les gérer.
 
-Développée avec **Node.js**, **Express** et **MongoDB**, elle intègre l'upload de justificatifs sur **AWS S3**, l'authentification par **JWT** et un système de **notifications par email** automatisé.
+Développée avec **Node.js**, **Express** et **MongoDB**, elle intègre l'upload de justificatifs sur **AWS S3**, l'authentification par **JWT**, la réinitialisation de mot de passe par **email** et un système de gestion des rôles à trois niveaux.
 
 ---
 
 ## Fonctionnalités
 
 - **Authentification** : Connexion sécurisée par email/mot de passe avec token JWT
-- **Gestion des utilisateurs** : CRUD complet (création, lecture, mise à jour, suppression)
-- **Gestion des notes de frais** : CRUD complet avec filtrage par rôle (admin/visiteur)
+- **Réinitialisation de mot de passe** : Via email (utilisateur ou admin)
+- **Gestion des utilisateurs** : CRUD complet (création, lecture, mise à jour, suppression) avec gestion par service
+- **Gestion des notes de frais** : CRUD complet avec filtrage par rôle (visiteur/admin/superadmin)
+- **Changement de statut en masse** : Endpoint bulk pour modifier plusieurs notes simultanément
+- **Workflow de statuts** : Soumise → Validée → Remboursée / Refusée (avec motif de refus)
 - **Upload de justificatifs** : Upload d'images sur AWS S3 via Multer
-- **Notifications email** :
-  - Rappel automatique aux utilisateurs inactifs (cron job)
-  - Alerte en cas d'erreur de saisie sur une note de frais
-- **Sécurité** : Hashage SHA-256 des mots de passe, protection des routes par JWT
+- **Sécurité** : Hashage SHA-256 des mots de passe, protection des routes par JWT, contrôle d'accès par rôle
+- **Trois rôles** : `visiteur` (notes personnelles), `admin` (consultation + statuts), `superadmin` (tout + gestion users)
 
 ---
 
@@ -81,29 +82,33 @@ Développée avec **Node.js**, **Express** et **MongoDB**, elle intègre l'uploa
 
 ### Authentification (`/auth`)
 
-| Méthode | Route          | Description                  | Auth requise |
-|---------|----------------|------------------------------|:------------:|
-| POST    | `/auth/login`  | Connexion utilisateur        | Non          |
+| Méthode | Route                      | Description                              | Auth requise |
+|---------|----------------------------|------------------------------------------|:------------:|
+| POST    | `/auth/login`              | Connexion utilisateur                    | Non          |
+| POST    | `/auth/forgot-password`    | Demande de réinitialisation de mdp       | Non          |
+| POST    | `/auth/reset-password`     | Réinitialisation du mot de passe         | Non          |
+| POST    | `/auth/admin-reset-password`| Reset mdp par le super admin            | Oui (JWT)    |
 
 ### Utilisateurs (`/users`)
 
 | Méthode | Route            | Description                        | Auth requise |
 |---------|------------------|------------------------------------|:------------:|
-| GET     | `/users`         | Récupérer tous les utilisateurs    | Non          |
+| GET     | `/users`         | Récupérer tous les utilisateurs    | Oui (JWT)    |
 | POST    | `/users`         | Créer un utilisateur               | Non          |
 | GET     | `/users/:email`  | Récupérer un utilisateur par email | Non          |
-| PUT     | `/users/:email`  | Mettre à jour un utilisateur       | Non          |
-| DELETE  | `/users/:email`  | Supprimer un utilisateur           | Non          |
+| PUT     | `/users/:email`  | Mettre à jour un utilisateur       | Oui (JWT)    |
+| DELETE  | `/users/:email`  | Supprimer un utilisateur           | Oui (JWT)    |
 
 ### Notes de frais (`/bills`)
 
-| Méthode | Route         | Description                        | Auth requise |
-|---------|---------------|------------------------------------|:------------:|
-| GET     | `/bills`      | Récupérer les notes de frais       | Oui (JWT)    |
-| POST    | `/bills`      | Créer une note de frais            | Oui (JWT)    |
-| GET     | `/bills/:id`  | Récupérer une note par ID          | Oui (JWT)    |
-| PUT     | `/bills/:id`  | Mettre à jour une note             | Oui (JWT)    |
-| DELETE  | `/bills/:id`  | Supprimer une note                 | Oui (JWT)    |
+| Méthode | Route               | Description                        | Auth requise |
+|---------|---------------------|------------------------------------|:------------:|
+| GET     | `/bills`            | Récupérer les notes de frais       | Oui (JWT)    |
+| POST    | `/bills`            | Créer une note de frais            | Oui (JWT)    |
+| PUT     | `/bills/bulk-status` | Changement de statut en masse     | Oui (JWT)    |
+| GET     | `/bills/:id`        | Récupérer une note par ID          | Oui (JWT)    |
+| PUT     | `/bills/:id`        | Mettre à jour une note             | Oui (JWT)    |
+| DELETE  | `/bills/:id`        | Supprimer une note                 | Oui (JWT)    |
 
 ---
 
@@ -128,8 +133,7 @@ Développée avec **Node.js**, **Express** et **MongoDB**, elle intègre l'uploa
 | SHA-256        | Hashage des mots de passe            |
 | AWS S3         | Stockage des justificatifs           |
 | Multer         | Upload de fichiers                   |
-| Nodemailer     | Envoi d'emails                       |
-| node-cron      | Tâches planifiées                    |
+| Nodemailer     | Envoi d'emails (reset mot de passe)  |
 | dotenv         | Gestion des variables d'environnement|
 
 ---

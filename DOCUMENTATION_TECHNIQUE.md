@@ -10,10 +10,9 @@
 6. [Middlewares](#6-middlewares)
 7. [Services (Upload S3)](#7-services-upload-s3)
 8. [Système de mailing](#8-système-de-mailing)
-9. [Tâches planifiées (Cron)](#9-tâches-planifiées-cron)
-10. [Variables d'environnement](#10-variables-denvironnement)
-11. [Gestion des erreurs](#11-gestion-des-erreurs)
-12. [Diagrammes](#12-diagrammes)
+9. [Variables d'environnement](#9-variables-denvironnement)
+10. [Gestion des erreurs](#10-gestion-des-erreurs)
+11. [Diagrammes](#11-diagrammes)
 
 ---
 
@@ -38,8 +37,7 @@ GSB_BACKEND/
 ├── middlewares/               # Middlewares personnalisés
 │   └── upload.js
 ├── mails/                    # Services d'envoi d'emails
-│   ├── mailService.js
-│   └── cron.js
+│   └── mailService.js
 └── utils/                    # Utilitaires
     └── utils.js
 ```
@@ -58,17 +56,33 @@ L'application suit le pattern MVC sans la couche View (API REST pure) :
 
 ### 2.1 User (`models/user_model.js`)
 
-Représente un utilisateur de l'application (visiteur médical ou administrateur).
+Représente un utilisateur de l'application (visiteur médical, administrateur ou super administrateur).
 
 #### Schéma
 
-| Champ       | Type     | Requis | Unique | Défaut       | Description                      |
-|-------------|----------|:------:|:------:|--------------|----------------------------------|
-| `name`      | String   | ✅     | ❌     | —            | Nom complet de l'utilisateur     |
-| `email`     | String   | ✅     | ✅     | —            | Adresse email (identifiant)      |
-| `password`  | String   | ✅     | ❌     | —            | Mot de passe hashé (SHA-256)     |
-| `role`      | String   | ✅     | ❌     | —            | Rôle : `admin` ou `visiteur`     |
-| `createdAt` | String   | ❌     | ❌     | `Date.now`   | Date de création du compte       |
+| Champ              | Type     | Requis | Unique | Défaut       | Description                                          |
+|--------------------|----------|:------:|:------:|--------------|------------------------------------------------------|
+| `firstName`        | String   | ✅     | ❌     | —            | Prénom de l'utilisateur                              |
+| `lastName`         | String   | ✅     | ❌     | —            | Nom de famille de l'utilisateur                      |
+| `service`          | String   | ✅     | ❌     | —            | Service de l'utilisateur (ex : Comptabilité, RH…)    |
+| `email`            | String   | ✅     | ✅     | —            | Adresse email (identifiant unique)                   |
+| `password`         | String   | ✅     | ❌     | —            | Mot de passe hashé (SHA-256)                         |
+| `role`             | String   | ✅     | ❌     | —            | Rôle : `superadmin`, `admin` ou `visiteur`           |
+| `createdAt`        | String   | ❌     | ❌     | `Date.now`   | Date de création du compte                           |
+| `resetToken`       | String   | ❌     | ❌     | `null`       | Token de réinitialisation de mot de passe            |
+| `resetTokenExpiry` | Date     | ❌     | ❌     | `null`       | Date d'expiration du token de réinitialisation       |
+
+#### Rôles utilisateurs
+
+| Rôle          | Description                                                                 |
+|---------------|-----------------------------------------------------------------------------|
+| `visiteur`    | Visiteur médical — peut créer, modifier et supprimer ses propres notes      |
+| `admin`       | Administrateur (comptable) — peut consulter toutes les notes et changer les statuts |
+| `superadmin`  | Super administrateur — peut tout modifier/supprimer, gérer les utilisateurs |
+
+#### Services disponibles
+
+Comptabilité, Commercial, Direction, Informatique, Juridique, Marketing, Ressources Humaines, Logistique.
 
 #### Hooks (Middlewares Mongoose)
 
@@ -85,11 +99,15 @@ Représente un utilisateur de l'application (visiteur médical ou administrateur
 ```json
 {
   "_id": "64a1b2c3d4e5f6a7b8c9d0e1",
-  "name": "Jean Dupont",
+  "firstName": "Jean",
+  "lastName": "Dupont",
+  "service": "Commercial",
   "email": "jean.dupont@gsb.fr",
   "password": "a3f5b7c9d1e3f5a7b9c1d3e5f7a9b1c3d5e7f9a1b3c5d7e9f1a3b5c7d9e1f3",
   "role": "visiteur",
-  "createdAt": "1700000000000"
+  "createdAt": "1700000000000",
+  "resetToken": null,
+  "resetTokenExpiry": null
 }
 ```
 
@@ -101,26 +119,36 @@ Représente une note de frais soumise par un utilisateur.
 
 #### Schéma
 
-| Champ         | Type     | Requis | Défaut         | Description                               |
-|---------------|----------|:------:|----------------|-------------------------------------------|
-| `date`        | String   | ✅     | —              | Date de la dépense                        |
-| `amount`      | Number   | ✅     | —              | Montant de la dépense (en €)              |
-| `proof`       | String   | ✅     | —              | URL du justificatif stocké sur AWS S3     |
-| `description` | String   | ✅     | —              | Description de la dépense                 |
-| `userEmail`   | String   | ✅     | —              | Email de l'utilisateur ayant soumis       |
-| `status`      | String   | ✅     | —              | Statut : `En attente`, `Validé`, `Refusé` |
-| `type`        | String   | ✅     | —              | Type de frais (transport, repas, etc.)    |
-| `createdAt`   | String   | ❌     | `Date.now()`   | Date de création de la note               |
+| Champ             | Type     | Requis | Défaut         | Description                                         |
+|-------------------|----------|:------:|----------------|-----------------------------------------------------|
+| `date`            | String   | ✅     | —              | Date de la dépense                                  |
+| `amount`          | Number   | ✅     | —              | Montant de la dépense (en €)                        |
+| `proof`           | String   | ✅     | —              | URL du justificatif stocké sur AWS S3               |
+| `description`     | String   | ✅     | —              | Description de la dépense                           |
+| `userEmail`       | String   | ✅     | —              | Email de l'utilisateur ayant soumis                 |
+| `status`          | String   | ✅     | —              | Statut : `Soumise`, `Validée`, `Refusée`, `Remboursée` |
+| `type`            | String   | ✅     | —              | Type de frais (voir liste ci-dessous)               |
+| `createdAt`       | String   | ❌     | `Date.now()`   | Date de création de la note                         |
+| `rejectionReason` | String   | ❌     | `null`         | Motif du refus (renseigné par l'admin)              |
 
-#### Hook `pre('save')`
+#### Workflow des statuts
 
-Avant chaque sauvegarde, le hook vérifie la validité de la note :
-- Description non vide
-- Montant > 0
-- Justificatif présent
-- Statut = "En attente"
+```
+Soumise  →  Validée  →  Remboursée
+               ↓
+            Refusée  →  Soumise (remise en circulation)
+```
 
-En cas d'erreur de saisie, un **email d'alerte** est envoyé à l'utilisateur via `envoyerMailErreurSaisie()`, avec un mécanisme anti-spam (max 1 email par 10 minutes par utilisateur).
+| Statut        | Description                                          | Couleur |
+|---------------|------------------------------------------------------|---------|
+| `Soumise`     | Note déposée par l'employé, en attente de traitement | Bleu    |
+| `Validée`     | Approuvée par un administrateur                      | Vert    |
+| `Refusée`     | Rejetée par un administrateur (avec motif)           | Rouge   |
+| `Remboursée`  | Paiement effectué — état terminal                    | Émeraude |
+
+#### Types de frais
+
+Transport, Hébergement, Restauration, Fournitures, Téléphone, Déplacement, Formation, Représentation, ou texte libre via l'option "Autre" (max 30 caractères).
 
 #### Exemple de document
 
@@ -132,9 +160,10 @@ En cas d'erreur de saisie, un **email d'alerte** est envoyé à l'utilisateur vi
   "proof": "https://gsb-backend.s3.amazonaws.com/abc123.jpg",
   "description": "Repas client - Restaurant Le Gourmet",
   "userEmail": "jean.dupont@gsb.fr",
-  "status": "En attente",
-  "type": "Repas",
-  "createdAt": "1700000000000"
+  "status": "Soumise",
+  "type": "Restauration",
+  "createdAt": "1700000000000",
+  "rejectionReason": null
 }
 ```
 
@@ -175,7 +204,9 @@ Client                          Serveur
   "id": "64a1b2c3d4e5f6a7b8c9d0e1",
   "role": "visiteur",
   "email": "jean.dupont@gsb.fr",
-  "name": "Jean Dupont",
+  "firstName": "Jean",
+  "lastName": "Dupont",
+  "service": "Commercial",
   "iat": 1700000000,
   "exp": 1700086400
 }
@@ -185,14 +216,32 @@ Client                          Serveur
 - **Algorithme** : HS256 (par défaut)
 - **Secret** : défini via `process.env.JWT_SECRET`
 
-### 3.3 Hashage des mots de passe
+### 3.3 Réinitialisation de mot de passe
+
+Deux mécanismes de réinitialisation sont disponibles :
+
+#### Via l'utilisateur (mot de passe oublié)
+
+1. `POST /auth/forgot-password` avec `{ email }`
+2. Génération d'un `resetToken` (hex 32 octets via `crypto.randomBytes`)
+3. Stockage du token hashé (SHA-256) et de sa date d'expiration (1h) dans le document User
+4. Envoi d'un email contenant un lien vers `/reset-password?token=<token>&email=<email>`
+5. `POST /auth/reset-password` avec `{ email, token, newPassword }` pour définir le nouveau mot de passe
+
+#### Via le super administrateur
+
+- `POST /auth/admin-reset-password` avec `{ email }` (route protégée par `verifyToken`)
+- Réservé au rôle `superadmin`
+- Génère un token et envoie un email de réinitialisation au nom de l'admin
+
+### 3.4 Hashage des mots de passe
 
 - **Algorithme** : SHA-256
 - **Salage** : Le mot de passe est concaténé avec `process.env.salt` avant le hash
 - **Formule** : `sha256(password + salt)`
 - Le hashage est effectué automatiquement dans le hook `pre('save')` du modèle User
 
-### 3.4 Middleware `verifyToken`
+### 3.5 Middleware `verifyToken`
 
 Fonction middleware qui protège les routes nécessitant une authentification :
 
@@ -207,10 +256,13 @@ Fonction middleware qui protège les routes nécessitant une authentification :
 
 ### 4.1 Authentification (`authentification_controller.js`)
 
-| Fonction      | Description                                           |
-|---------------|-------------------------------------------------------|
-| `login`       | Authentifie un utilisateur et retourne un token JWT   |
-| `verifyToken` | Middleware de vérification du token JWT               |
+| Fonction             | Description                                                    |
+|----------------------|----------------------------------------------------------------|
+| `login`              | Authentifie un utilisateur et retourne un token JWT            |
+| `verifyToken`        | Middleware de vérification du token JWT                        |
+| `forgotPassword`     | Génère un token de réinitialisation et envoie un email         |
+| `resetPassword`      | Réinitialise le mot de passe via un token valide               |
+| `adminResetPassword` | Envoie un email de reset au nom du super admin                 |
 
 #### `login(req, res)`
 - **Entrée** : `{ email, password }` dans `req.body`
@@ -219,40 +271,69 @@ Fonction middleware qui protège les routes nécessitant une authentification :
 
 ### 4.2 Utilisateurs (`users_controller.js`)
 
-| Fonction             | Méthode | Description                              |
-|----------------------|---------|------------------------------------------|
-| `getUsers`           | GET     | Retourne tous les utilisateurs           |
-| `getUsersByEmail`    | GET     | Retourne un utilisateur par son email    |
-| `createUser`         | POST    | Crée un nouvel utilisateur               |
-| `updateUserByEmail`  | PUT     | Met à jour un utilisateur par email      |
-| `deleteUserByEmail`  | DELETE  | Supprime un utilisateur par email        |
+| Fonction             | Méthode | Description                                     |
+|----------------------|---------|-------------------------------------------------|
+| `getUsers`           | GET     | Retourne tous les utilisateurs (protégé)        |
+| `getUsersByEmail`    | GET     | Retourne un utilisateur par son email           |
+| `createUser`         | POST    | Crée un nouvel utilisateur                      |
+| `updateUserByEmail`  | PUT     | Met à jour un utilisateur par email (protégé)   |
+| `deleteUserByEmail`  | DELETE  | Supprime un utilisateur par email (protégé)     |
 
 #### Détail `createUser(req, res)`
-- **Entrée** : `{ name, email, password, role }` dans `req.body`
+- **Entrée** : `{ firstName, lastName, service, email, password, role }` dans `req.body`
 - **Traitement** : Appelle `User.create()` → le hook `pre('save')` hash le mot de passe
 - **Sortie** : L'utilisateur créé (201) ou erreur (400/500)
 
 #### Détail `updateUserByEmail(req, res)`
 - **Entrée** : Email dans `req.params.email`, champs à modifier dans `req.body`
-- **Traitement** : `findOneAndUpdate` avec `runValidators: true`
+- **Traitement** : Si un mot de passe est fourni, il est hashé avant la mise à jour. `findOneAndUpdate` avec `runValidators: true`
 - **Sortie** : L'utilisateur mis à jour ou erreur 404
+
+#### Détail `deleteUserByEmail(req, res)`
+- **Restriction** : Réservé au rôle `superadmin`
+- Retourne `403` si l'utilisateur connecté n'est pas super administrateur
 
 ### 4.3 Notes de frais (`bills_controller.js`)
 
-| Fonction          | Méthode | Description                                  |
-|-------------------|---------|----------------------------------------------|
-| `getBills`        | GET     | Retourne les notes (filtrées par rôle)       |
-| `getBillById`     | GET     | Retourne une note par ID                     |
-| `createBill`      | POST    | Crée une note avec upload de justificatif    |
-| `updateBillById`  | PUT     | Met à jour une note par ID                   |
-| `deleteBillById`  | DELETE  | Supprime une note par ID                     |
+| Fonction           | Méthode | Description                                          |
+|--------------------|---------|------------------------------------------------------|
+| `getBills`         | GET     | Retourne les notes (filtrées par rôle)               |
+| `getBillById`      | GET     | Retourne une note par ID                             |
+| `createBill`       | POST    | Crée une note avec upload de justificatif            |
+| `updateBillById`   | PUT     | Met à jour une note par ID (restrictions par rôle)   |
+| `deleteBillById`   | DELETE  | Supprime une note par ID (restrictions par rôle)     |
+| `bulkUpdateStatus` | PUT     | Change le statut de plusieurs notes en masse         |
 
 #### Détail `getBills(req, res)` — Logique par rôle
 
 ```
-Si req.user.role === 'admin'  → Bill.find({})           // Toutes les notes
-Si req.user.role === 'visiteur' → Bill.find({ userEmail })  // Ses propres notes
+Si req.user.role === 'admin' ou 'superadmin'  → Bill.find({})  + enrichi avec userName
+Si req.user.role === 'visiteur'               → Bill.find({ userEmail })
 ```
+
+Quand un admin/superadmin récupère les factures, le contrôleur construit un `nameMap` en récupérant les noms (`firstName`, `lastName`) de chaque utilisateur depuis la collection User, et ajoute un champ `userName` à chaque note.
+
+#### Détail `updateBillById(req, res)` — Restrictions par rôle
+
+| Rôle         | Permissions                                                  |
+|--------------|--------------------------------------------------------------|
+| `visiteur`   | Peut modifier ses propres notes au statut `Soumise` uniquement |
+| `admin`      | Peut uniquement changer le `status` et la `rejectionReason`  |
+| `superadmin` | Peut modifier tous les champs de toutes les notes            |
+
+#### Détail `deleteBillById(req, res)` — Restrictions par rôle
+
+| Rôle         | Permissions                                                  |
+|--------------|--------------------------------------------------------------|
+| `visiteur`   | Peut supprimer ses propres notes au statut `Soumise` uniquement |
+| `admin`      | Pas de droit de suppression                                  |
+| `superadmin` | Peut supprimer toutes les notes                              |
+
+#### Détail `bulkUpdateStatus(req, res)`
+- **Entrée** : `{ ids: [...], status, rejectionReason? }` dans `req.body`
+- **Restriction** : Réservé aux rôles `admin` et `superadmin`
+- **Statuts autorisés** : `Soumise`, `Validée`, `Refusée`, `Remboursée`
+- **Traitement** : Met à jour le statut (et éventuellement le motif de refus) de toutes les notes correspondant aux IDs fournis
 
 #### Détail `createBill(req, res)`
 
@@ -273,32 +354,36 @@ Si req.user.role === 'visiteur' → Bill.find({ userEmail })  // Ses propres not
 ### 5.1 Authentification (`/auth`)
 
 ```
-POST /auth/login
+POST /auth/login                → login
+POST /auth/forgot-password      → forgotPassword
+POST /auth/reset-password       → resetPassword
+POST /auth/admin-reset-password → verifyToken → adminResetPassword
 ```
 
 ### 5.2 Utilisateurs (`/users`)
 
 ```
-GET    /users              → getUsers
+GET    /users              → verifyToken → getUsers
 POST   /users              → createUser
 GET    /users/:email       → getUsersByEmail
-PUT    /users/:email       → updateUserByEmail
-DELETE /users/:email       → deleteUserByEmail
+PUT    /users/:email       → verifyToken → updateUserByEmail
+DELETE /users/:email       → verifyToken → deleteUserByEmail
 ```
 
-> **Note** : Les routes utilisateurs ne sont pas protégées par `verifyToken`.
+> **Note** : Les routes GET (liste), PUT et DELETE sont protégées par `verifyToken`. La route POST (création de compte) et GET par email sont publiques.
 
 ### 5.3 Notes de frais (`/bills`)
 
 ```
 GET    /bills              → verifyToken → getBills
 POST   /bills              → verifyToken → upload.single('proof') → createBill
+PUT    /bills/bulk-status   → verifyToken → bulkUpdateStatus
 GET    /bills/:id          → verifyToken → getBillById
 PUT    /bills/:id          → verifyToken → updateBillById
 DELETE /bills/:id          → verifyToken → deleteBillById
 ```
 
-> **Note** : Toutes les routes bills sont protégées par le middleware `verifyToken`. La route POST utilise en plus le middleware Multer pour l'upload du fichier.
+> **Note** : Toutes les routes bills sont protégées par le middleware `verifyToken`. La route `PUT /bills/bulk-status` doit être déclarée avant `PUT /bills/:id` pour éviter les conflits de matching.
 
 ---
 
@@ -321,7 +406,7 @@ Middleware basé sur **Multer** pour la gestion de l'upload de fichiers.
 
 ### 6.2 verifyToken (dans `authentification_controller.js`)
 
-Voir [section 3.4](#34-middleware-verifytoken).
+Voir [section 3.5](#35-middleware-verifytoken).
 
 ---
 
@@ -357,60 +442,29 @@ Service d'envoi d'emails utilisant **Nodemailer** avec le service Gmail.
 
 #### Fonctions disponibles
 
-| Fonction                           | Description                                              |
-|------------------------------------|----------------------------------------------------------|
-| `envoyerRappelUtilisateursInactifs`| Envoie un rappel aux users sans notes le mois précédent  |
-| `envoyerMailErreurSaisie`          | Envoie une alerte en cas d'erreur de saisie              |
+| Fonction                     | Description                                                       |
+|------------------------------|-------------------------------------------------------------------|
+| `envoyerMailResetPassword`   | Envoie un email de réinitialisation de mot de passe               |
 
-#### `envoyerRappelUtilisateursInactifs()`
+#### `envoyerMailResetPassword(email, firstName, resetUrl)`
 
-**Algorithme** :
-1. Calcule les dates de début et fin du mois précédent
-2. Parcourt tous les utilisateurs
-3. Pour chaque utilisateur, cherche ses notes du mois précédent
-4. Si aucune note → envoie un email de rappel
+Envoie un email contenant un lien de réinitialisation de mot de passe.
+
+**Paramètres** :
+- `email` : adresse email du destinataire
+- `firstName` : prénom de l'utilisateur (pour personnaliser le message)
+- `resetUrl` : URL complète de réinitialisation (contenant le token)
 
 **Email envoyé** :
 ```
-De : "Gestion Notes de Frais" <email>
-Objet : Rappel : Aucune note de frais soumise pour le mois précédent
-Corps : Bonjour {nom}, Nous avons remarqué que vous n'avez soumis aucune note de frais le mois dernier...
-```
-
-#### `envoyerMailErreurSaisie(email, message)`
-
-Envoie un email d'erreur de saisie à l'utilisateur concerné.
-- **Appelé depuis** : le hook `pre('save')` du modèle Bill
-- **Anti-spam** : max 1 email par 10 minutes par utilisateur (via `lastEmailMap`)
-
----
-
-## 9. Tâches planifiées (Cron)
-
-### `mails/cron.js`
-
-Utilise **node-cron** pour planifier l'envoi automatique de rappels.
-
-| Configuration actuelle | Fréquence         | Description                                |
-|------------------------|-------------------|--------------------------------------------|
-| `*/1 * * * *`         | Toutes les minutes| **Mode test** — vérification des inactifs  |
-
-> **Production** : Modifier l'expression cron en `0 8 1 * *` pour exécuter le rappel le **1er de chaque mois à 8h00**.
-
-**Syntaxe cron** :
-```
-┌──────────── minute (0-59)
-│ ┌────────── heure (0-23)
-│ │ ┌──────── jour du mois (1-31)
-│ │ │ ┌────── mois (1-12)
-│ │ │ │ ┌──── jour de la semaine (0-7)
-│ │ │ │ │
-* * * * *
+De : "Gestion Notes de Frais" <EMAIL_USER>
+Objet : Réinitialisation de votre mot de passe
+Corps : Bonjour {firstName}, Vous avez demandé la réinitialisation de votre mot de passe...
 ```
 
 ---
 
-## 10. Variables d'environnement
+## 9. Variables d'environnement
 
 | Variable        | Description                              | Exemple                                    |
 |-----------------|------------------------------------------|--------------------------------------------|
@@ -425,7 +479,7 @@ Utilise **node-cron** pour planifier l'envoi automatique de rappels.
 
 ---
 
-## 11. Gestion des erreurs
+## 10. Gestion des erreurs
 
 ### Codes HTTP utilisés
 
@@ -435,6 +489,7 @@ Utilise **node-cron** pour planifier l'envoi automatique de rappels.
 | 201  | Created                    | Ressource créée (utilisateur, note de frais)          |
 | 400  | Bad Request                | Données invalides, email en doublon                   |
 | 401  | Unauthorized               | Token absent, invalide ou expiré                      |
+| 403  | Forbidden                  | Rôle insuffisant (ex : admin tente une action superadmin) |
 | 404  | Not Found                  | Ressource non trouvée (utilisateur, note, route)      |
 | 500  | Internal Server Error      | Erreur serveur non gérée                              |
 
@@ -449,9 +504,9 @@ Les hooks `pre('save')` et `pre('findOneAndUpdate')` utilisent le pattern `throw
 
 ---
 
-## 12. Diagrammes
+## 11. Diagrammes
 
-### 12.1 Diagramme de flux — Création d'une note de frais
+### 11.1 Diagramme de flux — Création d'une note de frais
 
 ```
 ┌─────────┐     POST /bills      ┌──────────────┐
@@ -475,17 +530,10 @@ Les hooks `pre('save')` et `pre('findOneAndUpdate')` utilisent le pattern `throw
                     ┌─────────────┐          ┌──────────────┐
                     │  Upload S3  │          │  Save Bill   │
                     │ (utils.js)  │          │  (MongoDB)   │
-                    └─────────────┘          └──────┬───────┘
-                                                    │
-                                                    ▼
-                                             ┌─────────────┐
-                                             │  pre('save') │
-                                             │  → Vérif.   │
-                                             │  → Email ?  │
-                                             └─────────────┘
+                    └─────────────┘          └──────────────┘
 ```
 
-### 12.2 Diagramme de flux — Authentification
+### 11.2 Diagramme de flux — Authentification
 
 ```
 ┌─────────┐  POST /auth/login   ┌─────────────────┐
@@ -525,7 +573,59 @@ Les hooks `pre('save')` et `pre('findOneAndUpdate')` utilisent le pattern `throw
             └─────────────┘
 ```
 
-### 12.3 Relations entre les modules
+### 11.3 Diagramme de flux — Réinitialisation de mot de passe
+
+```
+┌─────────┐  POST /auth/forgot-password   ┌──────────────────┐
+│  Client  │ ───────────────────────────> │  forgotPassword() │
+└─────────┘  { email }                    └────────┬─────────┘
+                                                   │
+                                                   ▼
+                                          ┌───────────────┐
+                                          │ User.findOne() │
+                                          └───────┬───────┘
+                                                  │
+                                                  ▼
+                                         ┌─────────────────┐
+                                         │ crypto.random    │
+                                         │ Bytes(32)        │
+                                         └────────┬────────┘
+                                                  │
+                                    ┌─────────────┼──────────────┐
+                                    ▼                            ▼
+                           ┌────────────────┐          ┌──────────────────┐
+                           │ Sauver token   │          │ Envoyer email    │
+                           │ hashé en DB    │          │ avec lien reset  │
+                           └────────────────┘          └──────────────────┘
+```
+
+### 11.4 Diagramme de flux — Changement de statut en masse
+
+```
+┌─────────┐  PUT /bills/bulk-status  ┌──────────────┐
+│  Client  │ ─────────────────────> │  verifyToken  │
+└─────────┘  { ids, status,         └──────┬───────┘
+               rejectionReason? }          │
+                                           ▼
+                                   ┌────────────────┐
+                                   │ Vérifier rôle  │
+                                   │ admin/superadmin│
+                                   └───────┬────────┘
+                                           │
+                                           ▼
+                                   ┌────────────────┐
+                                   │ Bill.updateMany │
+                                   │ ({ _id: ids })  │
+                                   └───────┬────────┘
+                                           │
+                                           ▼
+                                    ┌─────────────┐
+                                    │  200 OK     │
+                                    │  { count }  │
+                                    └─────────────┘
+```
+
+### 11.5 Relations entre les modules
 
 ```
                          ┌──────────┐
@@ -556,14 +656,9 @@ Les hooks `pre('save')` et `pre('findOneAndUpdate')` utilisent le pattern `throw
                         ┌──────────┐ ┌────────┐ ┌────────┐
                         │ upload.js│ │utils.js│ │ mail   │
                         │ (Multer) │ │ (S3)   │ │Service │
-                        └──────────┘ └────────┘ └───┬────┘
-                                                    │
-                                                    ▼
-                                               ┌────────┐
-                                               │cron.js │
-                                               └────────┘
+                        └──────────┘ └────────┘ └────────┘
 ```
 
 ---
 
-*Documentation générée le 02/03/2026 — GSB Backend v1.0.0*
+*Documentation mise à jour le 13/04/2026 — GSB Backend v2.0.0*
