@@ -45,12 +45,13 @@ const userSchema = new mongoose.Schema({
 
 // exemple de hook pour gérer les erreur directement dans le model
 userSchema.pre('save',async function(next){
-    const existingUser = await User.findOne({ email: this.email})
-    if (existingUser) {
-        throw new Error('User already exists', {cause: 400})
+    if (this.isNew) {
+        const existingUser = await User.findOne({ email: this.email})
+        if (existingUser) {
+            throw new Error('User already exists', {cause: 400})
+        }
+        this.password = sha256(this.password + process.env.salt)
     }
-
-    this.password = sha256(this.password + process.env.salt)
     next()
 
 })
