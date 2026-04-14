@@ -9,10 +9,9 @@
 5. [Routes](#5-routes)
 6. [Middlewares](#6-middlewares)
 7. [Services (Upload S3)](#7-services-upload-s3)
-8. [Système de mailing](#8-système-de-mailing)
-9. [Variables d'environnement](#9-variables-denvironnement)
-10. [Gestion des erreurs](#10-gestion-des-erreurs)
-11. [Diagrammes](#11-diagrammes)
+8. [Variables d'environnement](#8-variables-denvironnement)
+9. [Gestion des erreurs](#9-gestion-des-erreurs)
+10. [Diagrammes](#10-diagrammes)
 
 ---
 
@@ -36,8 +35,6 @@ GSB_BACKEND/
 │   └── user_routes.js
 ├── middlewares/               # Middlewares personnalisés
 │   └── upload.js
-├── mails/                    # Services d'envoi d'emails
-│   └── mailService.js
 └── utils/                    # Utilitaires
     └── utils.js
 ```
@@ -69,8 +66,6 @@ Représente un utilisateur de l'application (visiteur médical, administrateur o
 | `password`         | String   | ✅     | ❌     | —            | Mot de passe hashé (SHA-256)                         |
 | `role`             | String   | ✅     | ❌     | —            | Rôle : `superadmin`, `admin` ou `visiteur`           |
 | `createdAt`        | String   | ❌     | ❌     | `Date.now`   | Date de création du compte                           |
-| `resetToken`       | String   | ❌     | ❌     | `null`       | Token de réinitialisation de mot de passe            |
-| `resetTokenExpiry` | Date     | ❌     | ❌     | `null`       | Date d'expiration du token de réinitialisation       |
 
 #### Rôles utilisateurs
 
@@ -105,9 +100,7 @@ Comptabilité, Commercial, Direction, Informatique, Juridique, Marketing, Ressou
   "email": "jean.dupont@gsb.fr",
   "password": "a3f5b7c9d1e3f5a7b9c1d3e5f7a9b1c3d5e7f9a1b3c5d7e9f1a3b5c7d9e1f3",
   "role": "visiteur",
-  "createdAt": "1700000000000",
-  "resetToken": null,
-  "resetTokenExpiry": null
+  "createdAt": "1700000000000"
 }
 ```
 
@@ -220,19 +213,17 @@ Client                          Serveur
 
 Deux mécanismes de réinitialisation sont disponibles :
 
-#### Via l'utilisateur (mot de passe oublié)
+#### Via la page de profil (utilisateur connecté)
 
-1. `POST /auth/forgot-password` avec `{ email }`
-2. Génération d'un `resetToken` (hex 32 octets via `crypto.randomBytes`)
-3. Stockage du token hashé (SHA-256) et de sa date d'expiration (1h) dans le document User
-4. Envoi d'un email contenant un lien vers `/reset-password?token=<token>&email=<email>`
-5. `POST /auth/reset-password` avec `{ email, token, newPassword }` pour définir le nouveau mot de passe
+- `POST /auth/change-password` avec `{ currentPassword, newPassword }` (route protégée par `verifyToken`)
+- L'utilisateur doit fournir son mot de passe actuel pour confirmation
+- Le nouveau mot de passe doit contenir au moins 6 caractères
 
 #### Via le super administrateur
 
-- `POST /auth/admin-reset-password` avec `{ email }` (route protégée par `verifyToken`)
+- `POST /auth/admin-reset-password` avec `{ email, newPassword }` (route protégée par `verifyToken`)
 - Réservé au rôle `superadmin`
-- Génère un token et envoie un email de réinitialisation au nom de l'admin
+- Définit directement un nouveau mot de passe pour l'utilisateur ciblé
 
 ### 3.4 Hashage des mots de passe
 
@@ -260,9 +251,8 @@ Fonction middleware qui protège les routes nécessitant une authentification :
 |----------------------|----------------------------------------------------------------|
 | `login`              | Authentifie un utilisateur et retourne un token JWT            |
 | `verifyToken`        | Middleware de vérification du token JWT                        |
-| `forgotPassword`     | Génère un token de réinitialisation et envoie un email         |
-| `resetPassword`      | Réinitialise le mot de passe via un token valide               |
-| `adminResetPassword` | Envoie un email de reset au nom du super admin                 |
+| `adminResetPassword` | Réinitialise directement le mot de passe d'un utilisateur (superadmin) |
+| `changePassword`     | Permet à l'utilisateur connecté de changer son mot de passe   |
 
 #### `login(req, res)`
 - **Entrée** : `{ email, password }` dans `req.body`
@@ -355,9 +345,8 @@ Quand un admin/superadmin récupère les factures, le contrôleur construit un `
 
 ```
 POST /auth/login                → login
-POST /auth/forgot-password      → forgotPassword
-POST /auth/reset-password       → resetPassword
 POST /auth/admin-reset-password → verifyToken → adminResetPassword
+POST /auth/change-password      → verifyToken → changePassword
 ```
 
 ### 5.2 Utilisateurs (`/users`)
@@ -434,37 +423,7 @@ Gère l'upload des justificatifs sur **AWS S3**.
 
 ---
 
-## 8. Système de mailing
-
-### `mails/mailService.js`
-
-Service d'envoi d'emails utilisant **Nodemailer** avec le service Gmail.
-
-#### Fonctions disponibles
-
-| Fonction                     | Description                                                       |
-|------------------------------|-------------------------------------------------------------------|
-| `envoyerMailResetPassword`   | Envoie un email de réinitialisation de mot de passe               |
-
-#### `envoyerMailResetPassword(email, firstName, resetUrl)`
-
-Envoie un email contenant un lien de réinitialisation de mot de passe.
-
-**Paramètres** :
-- `email` : adresse email du destinataire
-- `firstName` : prénom de l'utilisateur (pour personnaliser le message)
-- `resetUrl` : URL complète de réinitialisation (contenant le token)
-
-**Email envoyé** :
-```
-De : "Gestion Notes de Frais" <EMAIL_USER>
-Objet : Réinitialisation de votre mot de passe
-Corps : Bonjour {firstName}, Vous avez demandé la réinitialisation de votre mot de passe...
-```
-
----
-
-## 9. Variables d'environnement
+## 8. Variables d'environnement
 
 | Variable        | Description                              | Exemple                                    |
 |-----------------|------------------------------------------|--------------------------------------------|
@@ -472,14 +431,11 @@ Corps : Bonjour {firstName}, Vous avez demandé la réinitialisation de votre mo
 | `MONGODB_URI`   | URI de connexion MongoDB                 | `mongodb+srv://user:pass@cluster/db`       |
 | `JWT_SECRET`    | Clé secrète pour signer les tokens JWT   | `mon_secret_jwt_123`                       |
 | `salt`          | Salt pour le hashage SHA-256             | `mon_salt_secret`                          |
-| `BUCKET_NAME`   | Nom du bucket AWS S3                     | `gsb-backend`                              |
-| `EMAIL_USER`    | Adresse email expéditeur (Gmail)         | `monapp@gmail.com`                         |
-| `EMAIL_PASS`    | Mot de passe d'application Gmail         | `xxxx xxxx xxxx xxxx`                      |
-| `CORS_ORIGIN`   | Origine autorisée pour CORS              | `http://localhost:5173`                    |
+| `BUCKET_NAME`   | Nom du bucket AWS S3                     | `gsb-backend`                              |\n| `CORS_ORIGIN`   | Origine autorisée pour CORS              | `http://localhost:5173`                    |", "oldString": "| `CORS_ORIGIN`   | Origine autoris\u00e9e pour CORS              | `http://localhost:5173`                    |
 
 ---
 
-## 10. Gestion des erreurs
+## 9. Gestion des erreurs
 
 ### Codes HTTP utilisés
 
@@ -504,7 +460,7 @@ Les hooks `pre('save')` et `pre('findOneAndUpdate')` utilisent le pattern `throw
 
 ---
 
-## 11. Diagrammes
+## 10. Diagrammes
 
 ### 11.1 Diagramme de flux — Création d'une note de frais
 
@@ -573,30 +529,57 @@ Les hooks `pre('save')` et `pre('findOneAndUpdate')` utilisent le pattern `throw
             └─────────────┘
 ```
 
-### 11.3 Diagramme de flux — Réinitialisation de mot de passe
+### 10.3 Diagramme de flux — Réinitialisation de mot de passe
+
+#### Via le profil utilisateur
 
 ```
-┌─────────┐  POST /auth/forgot-password   ┌──────────────────┐
-│  Client  │ ───────────────────────────> │  forgotPassword() │
-└─────────┘  { email }                    └────────┬─────────┘
-                                                   │
+┌─────────┐  POST /auth/change-password   ┌──────────────────┐
+│  Client  │ ───────────────────────────> │  verifyToken()    │
+└─────────┘  { currentPassword,           └────────┬─────────┘
+               newPassword }                       │
                                                    ▼
-                                          ┌───────────────┐
-                                          │ User.findOne() │
-                                          └───────┬───────┘
-                                                  │
-                                                  ▼
-                                         ┌─────────────────┐
-                                         │ crypto.random    │
-                                         │ Bytes(32)        │
-                                         └────────┬────────┘
-                                                  │
-                                    ┌─────────────┼──────────────┐
-                                    ▼                            ▼
-                           ┌────────────────┐          ┌──────────────────┐
-                           │ Sauver token   │          │ Envoyer email    │
-                           │ hashé en DB    │          │ avec lien reset  │
-                           └────────────────┘          └──────────────────┘
+                                          ┌───────────────────┐
+                                          │  changePassword()  │
+                                          └────────┬──────────┘
+                                                   │
+                                          ┌────────┴────────┐
+                                          │ Vérifier mot de  │
+                                          │ passe actuel     │
+                                          └────────┬────────┘
+                                                   │
+                                    ┌──────────────┴──────────────┐
+                                    ▼                             ▼
+                            Hash correspond            Hash différent
+                                    │                             │
+                                    ▼                             ▼
+                           ┌────────────────┐            ┌──────────┐
+                           │ Sauver nouveau │            │   401    │
+                           │ hash en DB     │            │  Error   │
+                           └────────────────┘            └──────────┘
+```
+
+#### Via le super administrateur
+
+```
+┌─────────┐  POST /auth/admin-reset-password  ┌──────────────────┐
+│  Client  │ ────────────────────────────────> │  verifyToken()    │
+└─────────┘  { email, newPassword }            └────────┬─────────┘
+                                                        │
+                                                        ▼
+                                              ┌─────────────────────┐
+                                              │ adminResetPassword() │
+                                              └────────┬────────────┘
+                                                       │
+                                              ┌────────┴────────┐
+                                              │ Vérifier rôle   │
+                                              │ = superadmin    │
+                                              └────────┬────────┘
+                                                       │
+                                              ┌────────────────┐
+                                              │ Hash + sauver  │
+                                              │ nouveau mdp    │
+                                              └────────────────┘
 ```
 
 ### 11.4 Diagramme de flux — Changement de statut en masse

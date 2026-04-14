@@ -10,7 +10,7 @@ const getUsers = async (req, res) => {
     if (req.user.role !== 'admin' && req.user.role !== 'superadmin') {
       return res.status(403).json({ message: 'Access denied' });
     }
-    const users = await User.find({}).select('-password -resetToken -resetTokenExpiry');
+    const users = await User.find({}).select('-password');
     res.json(users);
   }
   catch(error){

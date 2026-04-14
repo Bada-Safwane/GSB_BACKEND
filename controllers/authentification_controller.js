@@ -1,8 +1,6 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/user_model');
 const sha256 = require('js-sha256');
-const crypto = require('crypto');
-const { envoyerMailResetPassword } = require('../mails/mailService');
 
 /**
  * SB - Méthode pour authentifier un utilisateur
@@ -63,80 +61,16 @@ const verifyToken = (req, res, next) => {
 };
 
 /**
- * SB - Demande de réinitialisation de mot de passe
- * Génère un token unique et envoie un email avec le lien de réinitialisation
- */
-const forgotPassword = async (req, res) => {
-    const { email } = req.body;
-    if (!email) {
-        return res.status(400).json({ message: 'Email is required' });
-    }
-
-    const user = await User.findOne({ email });
-    if (!user) {
-        // Ne pas révéler si l'email existe ou non
-        return res.status(200).json({ message: 'Si un compte existe avec cet email, un lien de réinitialisation a été envoyé.' });
-    }
-
-    // Générer un token de réinitialisation
-    const resetToken = crypto.randomBytes(32).toString('hex');
-    const resetTokenExpiry = new Date(Date.now() + 3600000); // 1 heure
-
-    user.resetToken = resetToken;
-    user.resetTokenExpiry = resetTokenExpiry;
-    await user.save({ validateBeforeSave: false });
-
-    try {
-        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-        const resetUrl = `${frontendUrl}/reset-password?token=${resetToken}&email=${encodeURIComponent(email)}`;
-        await envoyerMailResetPassword(email, user.firstName, resetUrl);
-        res.status(200).json({ message: 'Si un compte existe avec cet email, un lien de réinitialisation a été envoyé.' });
-    } catch (err) {
-        user.resetToken = null;
-        user.resetTokenExpiry = null;
-        await user.save({ validateBeforeSave: false });
-        console.error('Error sending reset email:', err);
-        res.status(500).json({ message: 'Erreur lors de l\'envoi de l\'email' });
-    }
-};
-
-/**
- * SB - Réinitialisation du mot de passe avec token
- */
-const resetPassword = async (req, res) => {
-    const { email, token, newPassword } = req.body;
-    if (!email || !token || !newPassword) {
-        return res.status(400).json({ message: 'Email, token et nouveau mot de passe requis' });
-    }
-
-    const user = await User.findOne({
-        email,
-        resetToken: token,
-        resetTokenExpiry: { $gt: new Date() }
-    });
-
-    if (!user) {
-        return res.status(400).json({ message: 'Token invalide ou expiré' });
-    }
-
-    user.password = sha256(newPassword + process.env.salt);
-    user.resetToken = null;
-    user.resetTokenExpiry = null;
-    await user.save({ validateBeforeSave: false });
-
-    res.status(200).json({ message: 'Mot de passe réinitialisé avec succès' });
-};
-
-/**
- * SB - Envoi d'un email de réinitialisation par un admin/superadmin pour un utilisateur
+ * SB - Réinitialisation directe du mot de passe par un superadmin
+ * Permet au superadmin de définir un nouveau mot de passe pour un utilisateur
  */
 const adminResetPassword = async (req, res) => {
-    const { email } = req.body;
-    if (!email) {
-        return res.status(400).json({ message: 'Email is required' });
+    const { email, newPassword } = req.body;
+    if (!email || !newPassword) {
+        return res.status(400).json({ message: 'Email et nouveau mot de passe requis' });
     }
 
-    if (req.user.role !== 'admin' && req.user.role !== 'superadmin') {
+    if (req.user.role !== 'superadmin') {
         return res.status(403).json({ message: 'Access denied' });
     }
 
@@ -145,24 +79,38 @@ const adminResetPassword = async (req, res) => {
         return res.status(404).json({ message: 'Utilisateur introuvable' });
     }
 
-    const resetToken = crypto.randomBytes(32).toString('hex');
-    const resetTokenExpiry = new Date(Date.now() + 3600000);
-
-    user.resetToken = resetToken;
-    user.resetTokenExpiry = resetTokenExpiry;
+    user.password = sha256(newPassword + process.env.salt);
     await user.save({ validateBeforeSave: false });
 
-    try {
-        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-        const resetUrl = `${frontendUrl}/reset-password?token=${resetToken}&email=${encodeURIComponent(email)}`;
-        await envoyerMailResetPassword(email, user.firstName, resetUrl);
-        res.status(200).json({ message: 'Email de réinitialisation envoyé' });
-    } catch (err) {
-        console.error('Error sending reset email:', err);
-        res.status(500).json({ message: 'Erreur lors de l\'envoi de l\'email' });
-    }
+    res.status(200).json({ message: 'Mot de passe réinitialisé avec succès' });
 };
 
+/**
+ * SB - Changement de mot de passe par l'utilisateur connecté depuis son profil
+ */
+const changePassword = async (req, res) => {
+    const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || !newPassword) {
+        return res.status(400).json({ message: 'Mot de passe actuel et nouveau mot de passe requis' });
+    }
 
+    if (newPassword.length < 6) {
+        return res.status(400).json({ message: 'Le nouveau mot de passe doit contenir au moins 6 caractères' });
+    }
 
-module.exports = { login, verifyToken, forgotPassword, resetPassword, adminResetPassword };
+    const user = await User.findById(req.user.id);
+    if (!user) {
+        return res.status(404).json({ message: 'Utilisateur introuvable' });
+    }
+
+    if (user.password !== sha256(currentPassword + process.env.salt)) {
+        return res.status(401).json({ message: 'Mot de passe actuel incorrect' });
+    }
+
+    user.password = sha256(newPassword + process.env.salt);
+    await user.save({ validateBeforeSave: false });
+
+    res.status(200).json({ message: 'Mot de passe modifié avec succès' });
+};
+
+module.exports = { login, verifyToken, adminResetPassword, changePassword };
